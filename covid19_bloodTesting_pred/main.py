@@ -7,13 +7,21 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import GridSearchCV, KFold, train_test_split
 from xgboost import XGBClassifier
-from numpy import mean
+import numpy as np
 from copy import deepcopy
 import warnings
 import pickle
+from scipy import stats
+
+RBC_IDX = 3
+HGB_IDX = 1
+WBC_IDX = 7
+LYM_IDX = 4
+MONO_IDX = 13
+NEU_IDX = 15
 
 
-def nested_cross_validation(model, hyper_params):
+def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_flag):
     k = 5
     best_acc = 0
     best_hyperParams = {}
@@ -21,9 +29,9 @@ def nested_cross_validation(model, hyper_params):
     cv_outer = KFold(n_splits=k, shuffle=True, random_state=1)
     # enumerate splits
     outer_results = list()
-    for train_ix, test_ix in cv_outer.split(X):
-        X_train, X_test = X[train_ix, :], X[test_ix, :]
-        y_train, y_test = y[train_ix], y[test_ix]
+    for train_ix, test_ix in cv_outer.split(X_features):
+        X_train, X_test = X_features[train_ix, :], X_features[test_ix, :]
+        y_train, y_test = y_labels[train_ix], y_labels[test_ix]
 
         cv_inner = KFold(n_splits=k, shuffle=True, random_state=1)
 
@@ -36,6 +44,10 @@ def nested_cross_validation(model, hyper_params):
 
         oversample = SVMSMOTE(k_neighbors=5)
         X_train, y_train = oversample.fit_resample(X_train, y_train)
+
+        if ratio_flag:
+            X_train = add_ratio_cols(X_train)
+            X_test = add_ratio_cols(X_test)
 
         search = GridSearchCV(model, hyper_params, scoring='f1', cv=cv_inner, refit=True)
         result = search.fit(X_train, y_train)
@@ -54,21 +66,33 @@ def nested_cross_validation(model, hyper_params):
     return best_hyperParams
 
 
-def train_best_model(model):
+def add_ratio_cols(X_features):
+    return np.c_[X_features, stats.zscore(X_features[:, HGB_IDX] / X_features[:, RBC_IDX]),
+                 stats.zscore(X_features[:, WBC_IDX] / X_features[:, RBC_IDX]),
+                 stats.zscore(X_features[:, LYM_IDX] / X_features[:, RBC_IDX]),
+                 stats.zscore(X_features[:, MONO_IDX] / X_features[:, RBC_IDX]),
+                 stats.zscore(X_features[:, NEU_IDX] / X_features[:, RBC_IDX])]
+
+
+def train_best_model(model, X_features, y_labels, ratio_flag):
     acc_list = list()
     best_acc = 0
     best_model = None
 
     for i in range(10):
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+        X_train, X_test, y_train, y_test = train_test_split(X_features, y_labels, test_size=0.2)  # choose 20% randomly
 
-        imputer = IterativeImputer(max_iter=250)
+        imputer = IterativeImputer(max_iter=500)
         imputer.fit(X_train)  # fit the imputer only to training set
         X_train = imputer.transform(X_train)
         X_test = imputer.transform(X_test)
 
         oversample = SVMSMOTE(k_neighbors=5)
         X_train, y_train = oversample.fit_resample(X_train, y_train)
+
+        if ratio_flag:
+            X_train = add_ratio_cols(X_train)
+            X_test = add_ratio_cols(X_test)
 
         current_model = deepcopy(model)
         current_model.fit(X_train, y_train)
@@ -81,7 +105,7 @@ def train_best_model(model):
             best_acc = acc
             best_model = current_model
 
-    print('Mean accuracy: %.3f' % (mean(acc_list)))
+    print('Mean accuracy: %.3f    best acc: %.3f' % (np.mean(acc_list), best_acc))
     return best_model
 
 
@@ -120,50 +144,50 @@ if __name__ == "__main__":
     X = df.to_numpy()
     y = covid_results.apply(lambda res: 0 if res == 'negative' else 1).to_numpy()
 
-    # 2b
-    # Logistic Regression
-    print('Logistic Regression: ')
-    space = dict()
-    space['solver'] = ['liblinear', 'saga']
-    model_LR = LogisticRegression(random_state=1, max_iter=1000, dual=False)
-    best_hyper_params = nested_cross_validation(model_LR, space)
+    # 2b + 3
+    for append_ratio in [True]:  # False
+        # Logistic Regression
+        print(f'Logistic Regression | with ratio={append_ratio}: ')
+        space = dict()
+        space['solver'] = ['liblinear', 'saga']
+        model_LR = LogisticRegression(random_state=1, max_iter=1000, dual=False)
+        best_hyper_params = nested_cross_validation(model_LR, space, X, y, ratio_flag=append_ratio)
 
-    model_LR = LogisticRegression(random_state=1, max_iter=1000, dual=False, solver=best_hyper_params['solver'])
-    model_LR = train_best_model(model_LR)
+        model_LR = LogisticRegression(random_state=1, max_iter=1000, dual=False, solver=best_hyper_params['solver'])
+        model_LR = train_best_model(model_LR, X, y, ratio_flag=append_ratio)
 
-    info = '_'.join(best_hyper_params.values())
-    store_model(model_LR, f'LR_{str(info)}.p')
+        info = '_'.join(best_hyper_params.values())
+        store_model(model_LR, f'LR_{str(info)}_{append_ratio}.p')
 
-    # Random Forest
-    print('Random Forest: ')
-    space = dict()
-    space['n_estimators'] = [10, 20, 30, 40] + list(range(50, 105, 5))
-    space['max_depth'] = [2, 4, 8, 16, 32, 64]
+        # Random Forest
+        print(f'Random Forest: | with ratio={append_ratio}: ')
+        space = dict()
+        space['n_estimators'] = [10, 20, 30, 40] + list(range(50, 105, 5))
+        space['max_depth'] = [2, 4, 8, 16, 32, 64]
 
-    model_RF = RandomForestClassifier()
-    best_hyper_params = nested_cross_validation(model_RF, space)
+        model_RF = RandomForestClassifier()
+        best_hyper_params = nested_cross_validation(model_RF, space, X, y, ratio_flag=append_ratio)
 
-    model_RF = RandomForestClassifier(n_estimators=best_hyper_params['n_estimators'], max_depth=best_hyper_params['max_depth'])
-    model_RF = train_best_model(model_RF)
+        model_RF = RandomForestClassifier(n_estimators=best_hyper_params['n_estimators'], max_depth=best_hyper_params['max_depth'])
+        model_RF = train_best_model(model_RF, X, y, ratio_flag=append_ratio)
 
-    info = '_'.join(str(x) for x in best_hyper_params.values())
-    store_model(model_RF, f'RF_{str(info)}.p')
+        info = '_'.join(str(x) for x in best_hyper_params.values())
+        store_model(model_RF, f'RF_{str(info)}_{append_ratio}.p')
 
-    # XGBoost
-    print('XGBoost: ')
-    space = dict()
-    space['n_estimators'] = [10, 20, 30, 40] + list(range(50, 105, 5))
-    space['max_depth'] = [2, 4, 8, 16, 32, 64]
-    space['learning_rate'] = [0.1, 0.05, 0.01]
+        # XGBoost
+        print(f'XGBoost: | with ratio={append_ratio}: ')
+        space = dict()
+        space['n_estimators'] = [10, 20, 30, 40] + list(range(50, 105, 5))
+        space['max_depth'] = [2, 4, 8, 16, 32, 64]
+        space['learning_rate'] = [0.1, 0.05, 0.01]
 
-    model_XGB = XGBClassifier(objective='binary:logistic', eval_metric='logloss')
-    best_hyper_params = nested_cross_validation(model_XGB, space)
+        model_XGB = XGBClassifier(objective='binary:logistic', eval_metric='logloss')
+        best_hyper_params = nested_cross_validation(model_XGB, space, X, y, ratio_flag=append_ratio)
 
-    model_XGB = XGBClassifier(objective='binary:logistic', n_estimators=best_hyper_params['n_estimators'],
-                              max_depth=best_hyper_params['max_depth'],
-                              learning_rate=best_hyper_params['learning_rate'], eval_metric='logloss')
-    model_XGB = train_best_model(model_XGB)
+        model_XGB = XGBClassifier(objective='binary:logistic', n_estimators=best_hyper_params['n_estimators'],
+                                  max_depth=best_hyper_params['max_depth'],
+                                  learning_rate=best_hyper_params['learning_rate'], eval_metric='logloss')
+        model_XGB = train_best_model(model_XGB, X, y, ratio_flag=append_ratio)
 
-    info = '_'.join(str(x) for x in best_hyper_params.values())
-    store_model(model_XGB, f'XGB_{info}.p')
-
+        info = '_'.join(str(x) for x in best_hyper_params.values())
+        store_model(model_XGB, f'XGB_{info}_{append_ratio}.p')
