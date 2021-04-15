@@ -12,6 +12,8 @@ from copy import deepcopy
 import warnings
 import pickle
 from scipy import stats
+from catboost import CatBoostClassifier
+from lightgbm import LGBMClassifier
 
 RBC_IDX = 3
 HGB_IDX = 1
@@ -145,7 +147,7 @@ if __name__ == "__main__":
     y = covid_results.apply(lambda res: 0 if res == 'negative' else 1).to_numpy()
 
     # 2b + 3
-    for append_ratio in [True]:  # False
+    for append_ratio in [False, True]:
         # Logistic Regression
         print(f'Logistic Regression | with ratio={append_ratio}: ')
         space = dict()
@@ -191,3 +193,23 @@ if __name__ == "__main__":
 
         info = '_'.join(str(x) for x in best_hyper_params.values())
         store_model(model_XGB, f'XGB_{info}_{append_ratio}.p')
+
+    # CatBoost
+    print(f'CatBoost: ')
+
+    model_CatBoost = CatBoostClassifier(n_estimators=50,
+                                        max_depth=8,
+                                        learning_rate=0.1)
+    model_CatBoost = train_best_model(model_CatBoost, X, y, ratio_flag=False)
+
+    store_model(model_CatBoost, f'CatBoost.p')  # mean accuracy 87.1%
+
+    # LightGBM
+    print(f'LightGBM:')
+
+    model_GBM = LGBMClassifier(objective='binary', n_estimators=50,
+                               max_depth=8,
+                               learning_rate=0.1)
+    model_GBM = train_best_model(model_GBM, X, y, ratio_flag=False)
+
+    store_model(model_GBM, f'LightGBM.p')  # mean accuracy 88.7%
