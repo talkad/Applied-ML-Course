@@ -28,16 +28,18 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
     best_acc = 0
     best_hyperParams = {}
 
-    cv_outer = KFold(n_splits=k, shuffle=True, random_state=1)
+    cv_outer = KFold(n_splits=k)
     # enumerate splits
     outer_results = list()
     for train_ix, test_ix in cv_outer.split(X_features):
+        # print("epoch")
+
         X_train, X_test = X_features[train_ix, :], X_features[test_ix, :]
         y_train, y_test = y_labels[train_ix], y_labels[test_ix]
 
-        cv_inner = KFold(n_splits=k, shuffle=True, random_state=1)
+        cv_inner = KFold(n_splits=k)
 
-        model = deepcopy(model)
+        new_model = deepcopy(model)
 
         imputer = IterativeImputer(max_iter=250)
         imputer.fit(X_train)  # fit the imputer only to training set
@@ -51,7 +53,7 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
             X_train = add_ratio_cols(X_train)
             X_test = add_ratio_cols(X_test)
 
-        search = GridSearchCV(model, hyper_params, scoring='f1', cv=cv_inner, refit=True)
+        search = GridSearchCV(new_model, hyper_params, scoring='f1', cv=cv_inner, refit=True)
         result = search.fit(X_train, y_train)
         best_model = result.best_estimator_
 
@@ -64,7 +66,7 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
 
         outer_results.append(acc)
 
-    print(f'acc: {best_acc} | params: {best_hyperParams}')
+    print(f'mean acc: {np.mean(outer_results)} |  acc: {best_acc} | params: {best_hyperParams}')
     return best_hyperParams
 
 
@@ -197,19 +199,24 @@ if __name__ == "__main__":
     # CatBoost
     print(f'CatBoost: ')
 
-    model_CatBoost = CatBoostClassifier(n_estimators=50,
-                                        max_depth=8,
-                                        learning_rate=0.1)
-    model_CatBoost = train_best_model(model_CatBoost, X, y, ratio_flag=False)
+    space = dict()
+    space['n_estimators'] = [60, 80, 100]
+    space['max_depth'] = [16, 32, 64]
+    space['learning_rate'] = [0.1]
 
-    store_model(model_CatBoost, f'CatBoost.p')  # mean accuracy 87.1%
+    model_CatBoost = CatBoostClassifier()
+    best_hyper_params = nested_cross_validation(model_CatBoost, space, X, y, ratio_flag=False)
 
     # LightGBM
     print(f'LightGBM:')
 
-    model_GBM = LGBMClassifier(objective='binary', n_estimators=50,
-                               max_depth=8,
-                               learning_rate=0.1)
-    model_GBM = train_best_model(model_GBM, X, y, ratio_flag=False)
+    space = dict()
+    space['n_estimators'] = [10, 20, 30, 40] + list(range(50, 105, 5))
+    space['max_depth'] = [2, 4, 8, 16, 32, 64]
+    space['learning_rate'] = [0.1, 0.05, 0.01]
 
-    store_model(model_GBM, f'LightGBM.p')  # mean accuracy 88.7%
+    model_GBM = LGBMClassifier(objective='binary')
+    nested_cross_validation(model_GBM, space, X, y, ratio_flag=False)
+
+    # mean accuracy 83.2%  |  best accuracy 91.8%
+    # params: {'learning_rate': 0.1, 'max_depth': 32, 'n_estimators': 100}
