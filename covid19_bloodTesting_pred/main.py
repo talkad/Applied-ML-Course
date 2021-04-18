@@ -32,7 +32,6 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
     # enumerate splits
     outer_results = list()
     for train_ix, test_ix in cv_outer.split(X_features):
-        # print("epoch")
 
         X_train, X_test = X_features[train_ix, :], X_features[test_ix, :]
         y_train, y_test = y_labels[train_ix], y_labels[test_ix]
@@ -65,6 +64,7 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
             best_hyperParams = result.best_params_
 
         outer_results.append(acc)
+        print(f'======================{acc}============================')
 
     print(f'mean acc: {np.mean(outer_results)} |  acc: {best_acc} | params: {best_hyperParams}')
     return best_hyperParams
@@ -82,6 +82,7 @@ def train_best_model(model, X_features, y_labels, ratio_flag):
     acc_list = list()
     best_acc = 0
     best_model = None
+    data = []
 
     for i in range(10):
         X_train, X_test, y_train, y_test = train_test_split(X_features, y_labels, test_size=0.2)  # choose 20% randomly
@@ -106,11 +107,12 @@ def train_best_model(model, X_features, y_labels, ratio_flag):
 
         acc_list.append(acc)
         if acc > best_acc:
+            data = [X_train, X_test, y_train, y_test]
             best_acc = acc
             best_model = current_model
 
     print('Mean accuracy: %.3f    best acc: %.3f' % (np.mean(acc_list), best_acc))
-    return best_model
+    return best_model, data
 
 
 def store_model(model, filename):
@@ -158,10 +160,11 @@ if __name__ == "__main__":
         best_hyper_params = nested_cross_validation(model_LR, space, X, y, ratio_flag=append_ratio)
 
         model_LR = LogisticRegression(random_state=1, max_iter=1000, dual=False, solver=best_hyper_params['solver'])
-        model_LR = train_best_model(model_LR, X, y, ratio_flag=append_ratio)
+        model_LR, data_LR = train_best_model(model_LR, X, y, ratio_flag=append_ratio)
 
         info = '_'.join(best_hyper_params.values())
-        store_model(model_LR, f'LR_{str(info)}_{append_ratio}.p')
+        data_LR.append(model_LR)
+        store_model(data_LR, f'LR_{str(info)}_{append_ratio}.p')
 
         # Random Forest
         print(f'Random Forest: | with ratio={append_ratio}: ')
@@ -173,10 +176,11 @@ if __name__ == "__main__":
         best_hyper_params = nested_cross_validation(model_RF, space, X, y, ratio_flag=append_ratio)
 
         model_RF = RandomForestClassifier(n_estimators=best_hyper_params['n_estimators'], max_depth=best_hyper_params['max_depth'])
-        model_RF = train_best_model(model_RF, X, y, ratio_flag=append_ratio)
+        model_RF, data_RF = train_best_model(model_RF, X, y, ratio_flag=append_ratio)
 
         info = '_'.join(str(x) for x in best_hyper_params.values())
-        store_model(model_RF, f'RF_{str(info)}_{append_ratio}.p')
+        data_RF.append(model_RF)
+        store_model(data_RF, f'RF_{str(info)}_{append_ratio}.p')
 
         # XGBoost
         print(f'XGBoost: | with ratio={append_ratio}: ')
@@ -191,21 +195,27 @@ if __name__ == "__main__":
         model_XGB = XGBClassifier(objective='binary:logistic', n_estimators=best_hyper_params['n_estimators'],
                                   max_depth=best_hyper_params['max_depth'],
                                   learning_rate=best_hyper_params['learning_rate'], eval_metric='logloss')
-        model_XGB = train_best_model(model_XGB, X, y, ratio_flag=append_ratio)
+        model_XGB, data_XGB = train_best_model(model_XGB, X, y, ratio_flag=append_ratio)
 
         info = '_'.join(str(x) for x in best_hyper_params.values())
-        store_model(model_XGB, f'XGB_{info}_{append_ratio}.p')
+        data_XGB.append(model_XGB)
+        store_model(data_XGB, f'XGB_{info}_{append_ratio}.p')
 
     # CatBoost
     print(f'CatBoost: ')
 
     space = dict()
-    space['n_estimators'] = [60, 80, 100]
-    space['max_depth'] = [16, 32, 64]
-    space['learning_rate'] = [0.1]
+    space['learning_rate'] = [0.1, 0.05, 0.01]
 
     model_CatBoost = CatBoostClassifier()
     best_hyper_params = nested_cross_validation(model_CatBoost, space, X, y, ratio_flag=False)
+
+    model_CatBoost = CatBoostClassifier(learning_rate=best_hyper_params['learning_rate'])
+    model_CatBoost, data_Cat = train_best_model(model_CatBoost, X, y, ratio_flag=False)
+
+    info = '_'.join(str(x) for x in best_hyper_params.values())
+    data_Cat.append(model_CatBoost)
+    store_model(data_Cat, f'CatBoost_{info}.p')
 
     # LightGBM
     print(f'LightGBM:')
@@ -216,7 +226,13 @@ if __name__ == "__main__":
     space['learning_rate'] = [0.1, 0.05, 0.01]
 
     model_GBM = LGBMClassifier(objective='binary')
-    nested_cross_validation(model_GBM, space, X, y, ratio_flag=False)
+    best_hyper_params = nested_cross_validation(model_GBM, space, X, y, ratio_flag=False)
 
-    # mean accuracy 83.2%  |  best accuracy 91.8%
-    # params: {'learning_rate': 0.1, 'max_depth': 32, 'n_estimators': 100}
+    model_GBM = LGBMClassifier(objective='binary', n_estimators=best_hyper_params['n_estimators'],
+                               max_depth=best_hyper_params['max_depth'],
+                               learning_rate=best_hyper_params['learning_rate'])
+    model_GBM, data_GBM = train_best_model(model_GBM, X, y, ratio_flag=False)
+
+    info = '_'.join(str(x) for x in best_hyper_params.values())
+    data_GBM.append(model_GBM)
+    store_model(data_GBM, f'LightGBM_{info}.p')
