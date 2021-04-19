@@ -14,6 +14,7 @@ import pickle
 from scipy import stats
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
+import shap
 
 RBC_IDX = 3
 HGB_IDX = 1
@@ -178,6 +179,10 @@ if __name__ == "__main__":
         model_RF = RandomForestClassifier(n_estimators=best_hyper_params['n_estimators'], max_depth=best_hyper_params['max_depth'])
         model_RF, data_RF = train_best_model(model_RF, X, y, ratio_flag=append_ratio)
 
+        explainer = shap.Explainer(model_RF, data_RF[1])
+        shap_values = explainer(data_RF[1])
+        shap.plots.beeswarm(shap_values, max_display=23)
+
         info = '_'.join(str(x) for x in best_hyper_params.values())
         data_RF.append(model_RF)
         store_model(data_RF, f'RF_{str(info)}_{append_ratio}.p')
@@ -197,6 +202,10 @@ if __name__ == "__main__":
                                   learning_rate=best_hyper_params['learning_rate'], eval_metric='logloss')
         model_XGB, data_XGB = train_best_model(model_XGB, X, y, ratio_flag=append_ratio)
 
+        explainer = shap.Explainer(model_XGB, data_XGB[1])
+        shap_values = explainer(data_XGB[1])
+        shap.plots.beeswarm(shap_values, max_display=23)
+
         info = '_'.join(str(x) for x in best_hyper_params.values())
         data_XGB.append(model_XGB)
         store_model(data_XGB, f'XGB_{info}_{append_ratio}.p')
@@ -212,6 +221,10 @@ if __name__ == "__main__":
 
     model_CatBoost = CatBoostClassifier(learning_rate=best_hyper_params['learning_rate'])
     model_CatBoost, data_Cat = train_best_model(model_CatBoost, X, y, ratio_flag=False)
+
+    explainer = shap.Explainer(model_CatBoost, data_Cat[1])
+    shap_values = explainer(data_Cat[1])
+    shap.plots.beeswarm(shap_values, max_display=23)
 
     info = '_'.join(str(x) for x in best_hyper_params.values())
     data_Cat.append(model_CatBoost)
@@ -232,6 +245,10 @@ if __name__ == "__main__":
                                max_depth=best_hyper_params['max_depth'],
                                learning_rate=best_hyper_params['learning_rate'])
     model_GBM, data_GBM = train_best_model(model_GBM, X, y, ratio_flag=False)
+
+    explainer = shap.Explainer(model_GBM, data_GBM[1])
+    shap_values = explainer(data_GBM[1])
+    shap.plots.beeswarm(shap_values, max_display=23)
 
     info = '_'.join(str(x) for x in best_hyper_params.values())
     data_GBM.append(model_GBM)
