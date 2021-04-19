@@ -269,3 +269,5 @@ if __name__ == "__main__":
     shap.summary_plot(shap_values, X_test, max_display=23, feature_names=feature_lst,
                       class_names=["Negative", "Positive"], plot_size=(22, 10))
 
+    show_shap_plot("XGB_False.p")
+    show_shap_plot("LightGBM.p")
