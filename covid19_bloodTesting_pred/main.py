@@ -14,7 +14,8 @@ import pickle
 from scipy import stats
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
-import shap
+from sklearn.metrics import f1_score, recall_score, roc_auc_score
+from os import path
 
 RBC_IDX = 3
 HGB_IDX = 1
@@ -26,7 +27,7 @@ NEU_IDX = 15
 
 def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_flag):
     k = 5
-    best_acc = 0
+    best_f1 = 0
     best_hyperParams = {}
 
     cv_outer = KFold(n_splits=k)
@@ -58,16 +59,16 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
         best_model = result.best_estimator_
 
         yhat = best_model.predict(X_test)
-        acc = accuracy_score(y_test, yhat)
+        f1 = f1_score(y_test, yhat)
 
-        if acc > best_acc:
-            best_acc = acc
+        if f1 > best_f1:
+            best_f1 = f1
             best_hyperParams = result.best_params_
 
-        outer_results.append(acc)
-        print(f'======================{acc}============================')
+        outer_results.append(accuracy_score(y_test, yhat))
+        print(f'accuracy: {accuracy_score(y_test, yhat)}  |  f1: {f1_score(y_test, yhat)}   |  recall: {recall_score(y_test, yhat)}  |  AUROC: {roc_auc_score(y_test, yhat)}')
 
-    print(f'mean acc: {np.mean(outer_results)} |  acc: {best_acc} | params: {best_hyperParams}')
+    print(f'mean acc: {np.mean(outer_results)} |  best f1: {best_f1} | params: {best_hyperParams}')
     return best_hyperParams
 
 
@@ -132,6 +133,7 @@ def load_model(filename):
 
 if __name__ == "__main__":
     warnings.simplefilter("ignore")  # ignore ConvergenceWarning
+    # is_stored = path.exists("LR_False.p")
 
     # 2a - performing pre-processing
     df = pd.read_excel("dataset.xlsx", engine="openpyxl")
@@ -163,9 +165,8 @@ if __name__ == "__main__":
         model_LR = LogisticRegression(random_state=1, max_iter=1000, dual=False, solver=best_hyper_params['solver'])
         model_LR, data_LR = train_best_model(model_LR, X, y, ratio_flag=append_ratio)
 
-        info = '_'.join(best_hyper_params.values())
         data_LR.append(model_LR)
-        store_model(data_LR, f'LR_{str(info)}_{append_ratio}.p')
+        store_model(data_LR, f'LR_{append_ratio}.p')
 
         # Random Forest
         print(f'Random Forest: | with ratio={append_ratio}: ')
@@ -179,13 +180,8 @@ if __name__ == "__main__":
         model_RF = RandomForestClassifier(n_estimators=best_hyper_params['n_estimators'], max_depth=best_hyper_params['max_depth'])
         model_RF, data_RF = train_best_model(model_RF, X, y, ratio_flag=append_ratio)
 
-        explainer = shap.Explainer(model_RF, data_RF[1])
-        shap_values = explainer(data_RF[1])
-        shap.plots.beeswarm(shap_values, max_display=23)
-
-        info = '_'.join(str(x) for x in best_hyper_params.values())
         data_RF.append(model_RF)
-        store_model(data_RF, f'RF_{str(info)}_{append_ratio}.p')
+        store_model(data_RF, f'RF_{append_ratio}.p')
 
         # XGBoost
         print(f'XGBoost: | with ratio={append_ratio}: ')
@@ -202,13 +198,8 @@ if __name__ == "__main__":
                                   learning_rate=best_hyper_params['learning_rate'], eval_metric='logloss')
         model_XGB, data_XGB = train_best_model(model_XGB, X, y, ratio_flag=append_ratio)
 
-        explainer = shap.Explainer(model_XGB, data_XGB[1])
-        shap_values = explainer(data_XGB[1])
-        shap.plots.beeswarm(shap_values, max_display=23)
-
-        info = '_'.join(str(x) for x in best_hyper_params.values())
         data_XGB.append(model_XGB)
-        store_model(data_XGB, f'XGB_{info}_{append_ratio}.p')
+        store_model(data_XGB, f'XGB_{append_ratio}.p')
 
     # CatBoost
     print(f'CatBoost: ')
@@ -222,13 +213,8 @@ if __name__ == "__main__":
     model_CatBoost = CatBoostClassifier(learning_rate=best_hyper_params['learning_rate'])
     model_CatBoost, data_Cat = train_best_model(model_CatBoost, X, y, ratio_flag=False)
 
-    explainer = shap.Explainer(model_CatBoost, data_Cat[1])
-    shap_values = explainer(data_Cat[1])
-    shap.plots.beeswarm(shap_values, max_display=23)
-
-    info = '_'.join(str(x) for x in best_hyper_params.values())
     data_Cat.append(model_CatBoost)
-    store_model(data_Cat, f'CatBoost_{info}.p')
+    store_model(data_Cat, f'CatBoost.p')
 
     # LightGBM
     print(f'LightGBM:')
@@ -246,10 +232,5 @@ if __name__ == "__main__":
                                learning_rate=best_hyper_params['learning_rate'])
     model_GBM, data_GBM = train_best_model(model_GBM, X, y, ratio_flag=False)
 
-    explainer = shap.Explainer(model_GBM, data_GBM[1])
-    shap_values = explainer(data_GBM[1])
-    shap.plots.beeswarm(shap_values, max_display=23)
-
-    info = '_'.join(str(x) for x in best_hyper_params.values())
     data_GBM.append(model_GBM)
-    store_model(data_GBM, f'LightGBM_{info}.p')
+    store_model(data_GBM, f'LightGBM.p')
