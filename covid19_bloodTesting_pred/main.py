@@ -1,10 +1,10 @@
 import pandas as pd
 from imblearn.over_sampling import SVMSMOTE
-from sklearn.experimental import enable_iterative_imputer
+from imblearn.metrics import specificity_score, sensitivity_score
 from sklearn.impute import IterativeImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import GridSearchCV, KFold, train_test_split
 from xgboost import XGBClassifier
 import numpy as np
@@ -14,10 +14,7 @@ import pickle
 from scipy import stats
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
-from sklearn.metrics import f1_score, recall_score, roc_auc_score
-from os import path
 import shap
-import matplotlib.pyplot as plt
 
 RBC_IDX = 3
 HGB_IDX = 1
@@ -32,7 +29,7 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
     best_f1 = 0
     best_hyperParams = {}
 
-    cv_outer = KFold(n_splits=k)
+    cv_outer = KFold(n_splits=k, shuffle=True)
     # enumerate splits
     outer_results = list()
     for train_ix, test_ix in cv_outer.split(X_features):
@@ -40,7 +37,7 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
         X_train, X_test = X_features[train_ix, :], X_features[test_ix, :]
         y_train, y_test = y_labels[train_ix], y_labels[test_ix]
 
-        cv_inner = KFold(n_splits=k)
+        cv_inner = KFold(n_splits=k, shuffle=True)
 
         new_model = deepcopy(model)
 
@@ -56,12 +53,16 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
             X_train = add_ratio_cols(X_train)
             X_test = add_ratio_cols(X_test)
 
-        search = GridSearchCV(new_model, hyper_params, scoring='f1', cv=cv_inner, refit=True)
+        search = GridSearchCV(new_model, hyper_params, scoring='f1_macro', cv=cv_inner, refit=True)
         result = search.fit(X_train, y_train)
         best_model = result.best_estimator_
 
         yhat = best_model.predict(X_test)
-        f1 = f1_score(y_test, yhat)
+        f1 = f1_score(y_test, yhat, average='macro')
+
+        sen = sensitivity_score(y_test, yhat)
+        spec = specificity_score(y_test, yhat)
+
 
         if f1 > best_f1:
             best_f1 = f1
@@ -69,9 +70,9 @@ def nested_cross_validation(model, hyper_params, X_features, y_labels, ratio_fla
 
         outer_results.append(accuracy_score(y_test, yhat))
         print(
-            f'accuracy: {accuracy_score(y_test, yhat)}  |  f1: {f1_score(y_test, yhat)}   |  recall: {recall_score(y_test, yhat)}  |  AUROC: {roc_auc_score(y_test, yhat)}')
+            f'accuracy: {accuracy_score(y_test, yhat)}  |  f1: {f1_score(y_test, yhat, average="macro")}  |  sensetivity: {sen}  |  specificity: {spec}  |  AUROC: {roc_auc_score(y_test, yhat)}')
 
-    print(f'mean acc: {np.mean(outer_results)} |  best f1: {best_f1} | params: {best_hyperParams}')
+    # print(f'mean acc: {np.mean(outer_results)} |  best f1: {best_f1} | params: {best_hyperParams}')
     return best_hyperParams
 
 
@@ -85,6 +86,11 @@ def add_ratio_cols(X_features):
 
 def train_best_model(model, X_features, y_labels, ratio_flag):
     acc_list = list()
+    f1_list = list()
+    sens_list = list()
+    spec_list = list()
+    auroc_list = list()
+
     best_acc = 0
     best_model = None
     data = []
@@ -108,15 +114,26 @@ def train_best_model(model, X_features, y_labels, ratio_flag):
         current_model.fit(X_train, y_train)
 
         yhat = current_model.predict(X_test)
+
         acc = accuracy_score(y_test, yhat)
+        f1 = f1_score(y_test, yhat, average="macro")
+        sens = sensitivity_score(y_test, yhat)
+        spec = specificity_score(y_test, yhat)
+        auroc = roc_auc_score(y_test, yhat)
 
         acc_list.append(acc)
+        f1_list.append(f1)
+        sens_list.append(sens)
+        spec_list.append(spec)
+        auroc_list.append(auroc)
+
         if acc > best_acc:
             data = [X_train, X_test, y_train, y_test]
             best_acc = acc
             best_model = current_model
 
-    print('Mean accuracy: %.3f    best acc: %.3f' % (np.mean(acc_list), best_acc))
+    print('\nMean accuracy: %.3f  |  Mean f1: %.3f  |  Mean sensitivity: %.3f  |  Mean specificity: %.3f  |  Mean AUROC: %.3f'
+          % (np.mean(acc_list), np.mean(f1_list), np.mean(sens_list), np.mean(spec_list), np.mean(auroc_list)))
     return best_model, data
 
 
@@ -142,18 +159,13 @@ def show_shap_plot(modeldata_filename):
                    "Proteina C reativa mg/dL", "Creatinine", "Urea", "Potassium", "Sodium", "Aspartate transaminase",
                    "Alanine transaminase"]
     [X_train, X_test, y_train, y_test, model] = load_model(modeldata_filename)
-    explainer = shap.Explainer(model, X_train)
+    explainer = shap.Explainer(model.predict, X_train, feature_names=feature_lst)
     shap_values = explainer(X_test)
-    fig, ax = plt.subplots(figsize=(22, 10))
-    shap.summary_plot(shap_values, X_test, max_display=23, feature_names=feature_lst, plot_size=None)
-
+    shap.plots.beeswarm(shap_values, max_display=23, plot_size=(22, 10))
 
 if __name__ == "__main__":
-    warnings.simplefilter("ignore")  # ignore ConvergenceWarning
+        warnings.simplefilter("ignore")  # ignore ConvergenceWarning
 
-    is_stored = path.exists("LightGBM.p")
-
-    if not is_stored:
 
         # 2a - performing pre-processing
         df = pd.read_excel("dataset.xlsx", engine="openpyxl")
@@ -184,6 +196,7 @@ if __name__ == "__main__":
 
             model_LR = LogisticRegression(random_state=1, max_iter=1000, dual=False, solver=best_hyper_params['solver'])
             model_LR, data_LR = train_best_model(model_LR, X, y, ratio_flag=append_ratio)
+            print(f'Best hyper params: {best_hyper_params}\n')
 
             data_LR.append(model_LR)
             store_model(data_LR, f'LR_{append_ratio}.p')
@@ -200,6 +213,7 @@ if __name__ == "__main__":
             model_RF = RandomForestClassifier(n_estimators=best_hyper_params['n_estimators'],
                                               max_depth=best_hyper_params['max_depth'])
             model_RF, data_RF = train_best_model(model_RF, X, y, ratio_flag=append_ratio)
+            print(f'Best hyper params: {best_hyper_params}\n')
 
             data_RF.append(model_RF)
             store_model(data_RF, f'RF_{append_ratio}.p')
@@ -218,6 +232,7 @@ if __name__ == "__main__":
                                       max_depth=best_hyper_params['max_depth'],
                                       learning_rate=best_hyper_params['learning_rate'], eval_metric='logloss')
             model_XGB, data_XGB = train_best_model(model_XGB, X, y, ratio_flag=append_ratio)
+            print(f'Best hyper params: {best_hyper_params}\n')
 
             data_XGB.append(model_XGB)
             store_model(data_XGB, f'XGB_{append_ratio}.p')
@@ -226,6 +241,8 @@ if __name__ == "__main__":
         print(f'CatBoost: ')
 
         space = dict()
+        space['n_estimators'] = [10, 20, 30, 40] + list(range(50, 105, 5))
+        space['max_depth'] = [2, 4, 8]
         space['learning_rate'] = [0.1, 0.05, 0.01]
 
         model_CatBoost = CatBoostClassifier()
@@ -233,6 +250,7 @@ if __name__ == "__main__":
 
         model_CatBoost = CatBoostClassifier(learning_rate=best_hyper_params['learning_rate'])
         model_CatBoost, data_Cat = train_best_model(model_CatBoost, X, y, ratio_flag=False)
+        print(f'Best hyper params: {best_hyper_params}\n')
 
         data_Cat.append(model_CatBoost)
         store_model(data_Cat, f'CatBoost.p')
@@ -252,22 +270,13 @@ if __name__ == "__main__":
                                    max_depth=best_hyper_params['max_depth'],
                                    learning_rate=best_hyper_params['learning_rate'])
         model_GBM, data_GBM = train_best_model(model_GBM, X, y, ratio_flag=False)
+        print(f'Best hyper params: {best_hyper_params}\n')
 
         data_GBM.append(model_GBM)
         store_model(data_GBM, f'LightGBM.p')
 
-    # SHAP
-    feature_lst = ["Hematocrit", "Hemoglobin", "Platelets", "Red blood Cells", "Lymphocytes",
-                   "MCH", "MCHC",
-                   "Leukocytes", "Basophils", "Eosinophils", "Lactic Dehydrogenase", "MCV",
-                   "RDW", "Monocytes", "Mean platelet volume ", "Neutrophils",
-                   "Proteina C reativa mg/dL", "Creatinine", "Urea", "Potassium", "Sodium", "Aspartate transaminase",
-                   "Alanine transaminase"]
-
-    [X_train, X_test, y_train, y_test, model] = load_model("RF_False.p")
-    shap_values = shap.TreeExplainer(model).shap_values(X_train)
-    shap.summary_plot(shap_values, X_test, max_display=23, feature_names=feature_lst,
-                      class_names=["Negative", "Positive"], plot_size=(22, 10))
-
-    show_shap_plot("XGB_False.p")
-    show_shap_plot("LightGBM.p")
+        # SHAP
+        show_shap_plot('RF_False.p')
+        show_shap_plot('XGB_False.p')
+        show_shap_plot('LightGBM.p')
+        show_shap_plot('CatBoost.p')
