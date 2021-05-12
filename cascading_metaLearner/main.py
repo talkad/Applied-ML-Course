@@ -4,6 +4,7 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import log_loss
 import pandas as pd
 import numpy as np
+from lightgbm import LGBMClassifier
 
 improvement = True
 
