@@ -122,6 +122,31 @@ if __name__ == '__main__':
     #
     # print(f'model name: {filename}\n{"with improvements" if improvement else "no improvements"}\nlog loss = {log_loss(y_test, y_hat)}')
 
+    # filename = 'hmnist.csv'
+    #
+    # df = pd.read_csv(filename)
+    # df = df.sample(frac=1).reset_index(drop=True)
+    # df[['label']] = df[['label']].apply(lambda col: pd.Categorical(col).codes)
+    # y = df['label']
+    #
+    # X = df.to_numpy()
+    # total = len(X)
+    #
+    # X_train, X_test, y_train, y_test = X[:int(total*(1-test_ration))], X[int(total*(1-test_ration)):], y[:int(total*(1-test_ration))], y[int(total*(1-test_ration)):]
+    #
+    # # cascade classifiers training
+    # models = train(X_train, y_train)
+    #
+    # print(set(y_test), set(y_train))
+    #
+    # # evaluate model
+    # y_hat = list()
+    #
+    # for i in range(len(y_test)):
+    #     _, probability = predict(models, X_test[i])
+    #     y_hat.append(probability)
+    #
+    # print(f'model name: {filename}\n{"with improvements" if improvement else "no improvements"}\nlog loss = {log_loss(y_test, y_hat)}')
 
     # filename = 'CTG.xls'
     #
@@ -150,16 +175,23 @@ if __name__ == '__main__':
     #
     # print(f'model name: {filename}\n{"with improvements" if improvement else "no improvements"}\nlog loss = {log_loss(y_test, y_hat)}')
 
+    filename = 'hmnist.csv'
 
-    digits = load_digits()
+    df = pd.read_csv(filename)
+    df = df.sample(frac=1).reset_index(drop=True)
+    df[['label']] = df[['label']].apply(lambda col: pd.Categorical(col).codes)
+    y = df['label']
 
-    X_train, X_test, y_train, y_test = train_test_split(digits.images, digits.target, test_size=test_ration)
+    X = df.to_numpy()
+    total = len(X)
 
-    X_train = [X.flatten() for X in X_train]
-    X_test = [X.flatten() for X in X_test]
+    X_train, X_test, y_train, y_test = X[:int(total * (1 - test_ration))], X[int(total * (1 - test_ration)):], y[:int(
+        total * (1 - test_ration))], y[int(total * (1 - test_ration)):]
 
     # cascade classifiers training
     models = train(X_train, y_train)
+
+    print(set(y_test), set(y_train))
 
     # evaluate model
     y_hat = list()
@@ -168,4 +200,24 @@ if __name__ == '__main__':
         _, probability = predict(models, X_test[i])
         y_hat.append(probability)
 
-    print(f'model name: digits\n{"with improvements" if improvement else "no improvements"}\nlog loss = {log_loss(y_test, y_hat)}')
+    print(
+        f'model name: {filename}\n{"with improvements" if improvement else "no improvements"}\nlog loss = {log_loss(y_test, y_hat)}')
+
+    # digits = load_digits()
+    #
+    # X_train, X_test, y_train, y_test = train_test_split(digits.images, digits.target, test_size=test_ration)
+    #
+    # X_train = [X.flatten() for X in X_train]
+    # X_test = [X.flatten() for X in X_test]
+    #
+    # # cascade classifiers training
+    # models = train(X_train, y_train)
+    #
+    # # evaluate model
+    # y_hat = list()
+    #
+    # for i in range(len(y_test)):
+    #     _, probability = predict(models, X_test[i])
+    #     y_hat.append(probability)
+    #
+    # print(f'model name: digits\n{"with improvements" if improvement else "no improvements"}\nlog loss = {log_loss(y_test, y_hat)}')
